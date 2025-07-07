@@ -50,6 +50,15 @@ export default function Home() {
             Read our docs
           </a>
         </div>
+        <form className="flex flex-col gap-2 items-stretch w-full sm:w-auto">
+          <label htmlFor="wish" className="text-sm text-foreground">願い事:</label>
+          <input
+            id="wish"
+            type="text"
+            placeholder="願い事を入力してください"
+            className="border border-foreground/30 bg-background text-foreground placeholder-foreground/50 rounded px-3 py-2"
+          />
+        </form>
       </main>
       <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
         <a
