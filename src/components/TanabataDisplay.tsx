@@ -36,6 +36,9 @@ function asset(name: string) {
 
 const COLORS: TanzakuColor[] = ["red", "blue", "yellow", "green", "orange"];
 
+// 画面を漂う飾り(クラゲのようにふわふわ動く)に使う画像
+const DECO = ["fukinagashi", "amikazari", "crane", "lantern"];
+
 const INK: Record<TanzakuColor, string> = {
   red: "#fff6ec",
   blue: "#f2f6ff",
@@ -137,6 +140,150 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
           {wish.text}
         </p>
       </div>
+    </div>
+  );
+}
+
+// 飾り物を画面いっぱいに不規則に漂わせる(クラゲ風)。
+// requestAnimationFrame で DOM の transform を直接更新し React 再描画を避ける。
+interface Drifter {
+  el: HTMLImageElement | null;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  wobAmp: number;
+  wobSpeed: number;
+  wobPhase: number;
+  wobAmp2: number;
+  wobSpeed2: number;
+  wobPhase2: number;
+  pulseSpeed: number;
+  pulsePhase: number;
+  rotAmp: number;
+  rotSpeed: number;
+  rotPhase: number;
+}
+
+function Drifters({ count = 11 }: { count?: number }) {
+  const drifters = useRef<Drifter[]>([]);
+
+  useEffect(() => {
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const setup = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const vmin = Math.min(vw, vh);
+      drifters.current.forEach((d, i) => {
+        if (!d) return;
+        const el = d.el;
+        d.size = vmin * rnd(0.09, 0.19);
+        d.x = rnd(0, vw);
+        d.y = rnd(0, vh);
+        const ang = rnd(0, Math.PI * 2);
+        const speed = rnd(0.008, 0.022); // px/ms(ゆっくり漂う)
+        d.vx = Math.cos(ang) * speed;
+        d.vy = Math.sin(ang) * speed;
+        d.wobAmp = rnd(12, 42);
+        d.wobSpeed = rnd(0.0004, 0.0012);
+        d.wobPhase = rnd(0, 6.28);
+        d.wobAmp2 = rnd(10, 34);
+        d.wobSpeed2 = rnd(0.0003, 0.001);
+        d.wobPhase2 = rnd(0, 6.28);
+        d.pulseSpeed = rnd(0.0008, 0.0018);
+        d.pulsePhase = rnd(0, 6.28);
+        d.rotAmp = rnd(4, 12);
+        d.rotSpeed = rnd(0.0003, 0.0009);
+        d.rotPhase = rnd(0, 6.28);
+        if (el) {
+          el.style.height = `${d.size}px`;
+          el.style.opacity = "0.9";
+        }
+        void i;
+      });
+    };
+    setup();
+
+    let raf = 0;
+    let last: number | null = null;
+    const tick = (t: number) => {
+      if (last == null) last = t;
+      const dt = Math.min(50, t - last);
+      last = t;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      for (const d of drifters.current) {
+        if (!d || !d.el) continue;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        const m = d.size + 60;
+        if (d.x > vw + m) d.x = -m;
+        else if (d.x < -m) d.x = vw + m;
+        if (d.y > vh + m) d.y = -m;
+        else if (d.y < -m) d.y = vh + m;
+        const rx = d.x + Math.sin(t * d.wobSpeed + d.wobPhase) * d.wobAmp;
+        const ry = d.y + Math.cos(t * d.wobSpeed2 + d.wobPhase2) * d.wobAmp2;
+        const rot = Math.sin(t * d.rotSpeed + d.rotPhase) * d.rotAmp;
+        // クラゲの収縮: 縦に伸び縮みし、横は逆にわずかに縮む
+        const sy = 1 + Math.sin(t * d.pulseSpeed + d.pulsePhase) * 0.1;
+        const sx = 1 - (sy - 1) * 0.6;
+        d.el.style.transform = `translate(${rx}px, ${ry}px) rotate(${rot}deg) scale(${sx}, ${sy})`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    window.addEventListener("resize", setup);
+    window.addEventListener("orientationchange", setup);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", setup);
+      window.removeEventListener("orientationchange", setup);
+    };
+  }, []);
+
+  // 初期化前は画面外に置いてチラつきを防ぐ
+  if (drifters.current.length !== count) {
+    drifters.current = Array.from(
+      { length: count },
+      (_, i) => drifters.current[i] || ({ el: null } as Drifter)
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        overflow: "hidden",
+      }}
+    >
+      {Array.from({ length: count }).map((_, i) => (
+        <img
+          key={i}
+          ref={(el) => {
+            if (drifters.current[i]) drifters.current[i].el = el;
+          }}
+          src={asset(`${DECO[i % DECO.length]}.png`)}
+          alt=""
+          draggable={false}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            transformOrigin: "50% 50%",
+            willChange: "transform",
+            pointerEvents: "none",
+            opacity: 0,
+            transform: "translate(-9999px, 0)",
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -577,76 +724,7 @@ export default function TanabataDisplay() {
           onEnded={() => setShooting(false)}
         />
 
-        {/* 吹き流し(左上から吊るす) */}
-        <img
-          src={asset("fukinagashi.png")}
-          alt=""
-          style={{
-            position: "absolute",
-            pointerEvents: "none",
-            top: "calc(var(--vh, 1vh) * -1)",
-            left: "33vw",
-            height: "40vmin",
-            transformOrigin: "50% 0%",
-            animation: "swing 5.5s ease-in-out -1s infinite alternate",
-            ["--swing-from" as string]: "-2deg",
-            ["--swing-to" as string]: "2deg",
-          }}
-          draggable={false}
-        />
-
-        {/* 網飾り(右上から吊るす) */}
-        <img
-          src={asset("amikazari.png")}
-          alt=""
-          style={{
-            position: "absolute",
-            pointerEvents: "none",
-            opacity: 0.9,
-            top: "calc(var(--vh, 1vh) * -1)",
-            left: "63vw",
-            height: "32vmin",
-            transformOrigin: "50% 0%",
-            animation: "swing 7s ease-in-out -3s infinite alternate",
-            ["--swing-from" as string]: "-1.5deg",
-            ["--swing-to" as string]: "1.5deg",
-          }}
-          draggable={false}
-        />
-
-        {/* 折り鶴(右手の空を舞う) */}
-        <img
-          src={asset("crane.png")}
-          alt=""
-          style={{
-            position: "absolute",
-            pointerEvents: "none",
-            top: "calc(var(--vh, 1vh) * 26)",
-            left: "96vw",
-            height: "12vmin",
-            animation: "floaty 6s ease-in-out infinite",
-          }}
-          draggable={false}
-        />
-
-        {/* 提灯(左下に吊るす) */}
-        <img
-          src={asset("lantern.png")}
-          alt=""
-          style={{
-            position: "absolute",
-            pointerEvents: "none",
-            bottom: "calc(var(--vh, 1vh) * 20)",
-            left: "34vw",
-            height: "16vmin",
-            transformOrigin: "50% 0%",
-            animation:
-              "swing 4.5s ease-in-out infinite alternate, lantern-glow 3s ease-in-out infinite",
-            ["--swing-from" as string]: "-2deg",
-            ["--swing-to" as string]: "2deg",
-          }}
-          draggable={false}
-        />
+        {/* 飾り物は固定オーバーレイ側で画面全体を漂わせる(下の Drifters)。 */}
 
         {/* 笹と短冊。ステージ中央に配置(サイズは .bamboo=CSS のみ)。 */}
         <div
@@ -679,6 +757,9 @@ export default function TanabataDisplay() {
       </div>
 
       {/* ===== 固定オーバーレイ(パンしない) ===== */}
+
+      {/* 画面を漂う飾り物(クラゲ風) */}
+      <Drifters count={11} />
 
       {/* タイトル */}
       <h1
