@@ -13,6 +13,20 @@ body {
   font-family: var(--font-yuji), "Hiragino Mincho ProN", "Yu Mincho", serif;
 }
 
+/* 笹のサイズ。JS に頼らず CSS だけで画面に収める。
+   画面の向きで基準の辺を変え、笹画像の比率(607:1253)で高さを算出する。
+   横長(PC等)は高さ基準、縦長(サイネージ)は幅基準。 */
+.bamboo {
+  width: 51vh;
+  height: calc(51vh * 1253 / 607);
+}
+@media (orientation: portrait) {
+  .bamboo {
+    width: 62vw;
+    height: calc(62vw * 1253 / 607);
+  }
+}
+
 /* 笹全体のゆらぎ(根本を軸に) */
 @keyframes bamboo-sway {
   from {

@@ -131,28 +131,21 @@ export default function TanabataDisplay() {
   const rootRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(100);
 
-  // 古い WebView(Android 7.1 / LG LD-290EJS 等)は dvh・min()・clamp()・env()
-  // 非対応のため、JS で実測した px を CSS 変数に流し込んで使う。
-  // --vh: 表示中ビューポートの高さ1%、--vmin: 短辺1%、
-  // --bamboo-w/h: 笹の実寸(縦横比を保ったまま画面に収まるサイズ)。
+  // 表示中ビューポートの高さ1%を --vh として供給(ブラウザのツールバーで
+  // 高さが変わる端末向けの補正)。JS が動かない古い WebView でも、CSS 側は
+  // var(--vh, 1vh) のフォールバックで通常の vh として機能するので問題ない。
   useEffect(() => {
-    const setVars = () => {
+    const setVh = () => {
       const el = rootRef.current;
       if (!el) return;
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      el.style.setProperty("--vh", `${h / 100}px`);
-      el.style.setProperty("--vmin", `${Math.min(w, h) / 100}px`);
-      const bambooW = Math.min(h * 0.51, w * 0.62);
-      el.style.setProperty("--bamboo-w", `${bambooW}px`);
-      el.style.setProperty("--bamboo-h", `${(bambooW * 1253) / 607}px`);
+      el.style.setProperty("--vh", `${window.innerHeight / 100}px`);
     };
-    setVars();
-    window.addEventListener("resize", setVars);
-    window.addEventListener("orientationchange", setVars);
+    setVh();
+    window.addEventListener("resize", setVh);
+    window.addEventListener("orientationchange", setVh);
     return () => {
-      window.removeEventListener("resize", setVars);
-      window.removeEventListener("orientationchange", setVars);
+      window.removeEventListener("resize", setVh);
+      window.removeEventListener("orientationchange", setVh);
     };
   }, []);
 
@@ -238,15 +231,34 @@ export default function TanabataDisplay() {
     <div
       ref={rootRef}
       className="fixed inset-0 overflow-hidden select-none bg-black"
-      // 高さは JS 実測(--vh)基準。inset-0 の bottom:0 はシステムバーを含む
-      // 大きい方の高さになり下端が隠れるため、実測した表示領域で上書きする。
-      style={{ height: "calc(var(--vh, 1vh) * 100)" }}
+      // 決定的なレイアウトは Tailwind クラスに頼らず inline で直接指定する
+      // (古い WebView が生成 CSS を解釈できない場合の保険)。
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "calc(var(--vh, 1vh) * 100)",
+        overflow: "hidden",
+        background: "#000",
+      }}
       onPointerDown={burstSparks}
     >
-      {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示) */}
+      {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示)。
+          画面の長辺に合わせて中央基準でトリミング(object-fit: cover)。
+          伸縮させないため cover を inline で確実に指定する。 */}
       <video
         ref={bgVideoRef}
         className="absolute inset-0 w-full h-full object-cover"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: "center",
+        }}
         src={asset("milkyway.mp4")}
         poster={asset("sky.jpg")}
         autoPlay
@@ -336,16 +348,12 @@ export default function TanabataDisplay() {
         draggable={false}
       />
 
-      {/* 笹と短冊 */}
+      {/* 笹と短冊。サイズは .bamboo(CSS のみ・JS 非依存)で決める */}
       <div
-        className="absolute"
+        className="bamboo absolute"
         style={{
           right: "-6vmin",
-          bottom: "calc(var(--vh, 1vh) * -3)",
-          // 笹のサイズは JS 実測(--bamboo-w/h)。縦長画面で幅が画面の大半を
-          // 占めないよう、高さ51%と幅62%の小さい方を JS で算出している。
-          width: "var(--bamboo-w, 51vh)",
-          height: "var(--bamboo-h, calc(51vh * 1253 / 607))",
+          bottom: "-3vh",
           transformOrigin: "50% 100%",
           animation: "bamboo-sway 6s ease-in-out infinite alternate",
         }}
