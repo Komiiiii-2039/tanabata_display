@@ -30,8 +30,10 @@ body {
 }
 @media (orientation: portrait) {
   .bamboo {
-    width: 62vw;
-    height: calc(62vw * 1253 / 607);
+    /* 縦長画面では笹を大きく見せる。高さ基準で画面の 3/4 ほどを使い、
+       幅は画像比率で算出(画面幅を超える分は右端で自然にトリミング)。 */
+    height: 75vh;
+    width: calc(75vh * 607 / 1253);
   }
 }
 
