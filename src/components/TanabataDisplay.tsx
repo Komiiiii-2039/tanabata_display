@@ -208,15 +208,10 @@ export default function TanabataDisplay() {
 
   return (
     <div
-      className="fixed inset-0 overflow-hidden select-none"
+      className="fixed inset-0 overflow-hidden select-none bg-black"
       onPointerDown={burstSparks}
     >
-      {/* 背景: 天の川(動画が再生されるまでは静止画) */}
-      <img
-        src={asset("sky.jpg")}
-        alt=""
-        className="absolute inset-0 w-full h-full object-cover"
-      />
+      {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示) */}
       <video
         ref={bgVideoRef}
         className="absolute inset-0 w-full h-full object-cover"
@@ -315,8 +310,11 @@ export default function TanabataDisplay() {
         style={{
           right: "-6vmin",
           bottom: "-3vh",
-          height: "106vh",
-          aspectRatio: "607 / 1253",
+          // 笹のサイズ。高さ(vh)だけで決めると縦長画面では幅が画面の
+          // 大半を占めてしまうため、幅を vh と vw の小さい方で制限する。
+          // 高さは笹画像の比率(607:1253)からその幅を基に算出。
+          width: "min(51vh, 62vw)",
+          height: "calc(min(51vh, 62vw) * 1253 / 607)",
           transformOrigin: "50% 100%",
           animation: "bamboo-sway 6s ease-in-out infinite alternate",
         }}
@@ -324,7 +322,7 @@ export default function TanabataDisplay() {
         <img
           src={asset("bamboo.png")}
           alt="笹"
-          className="w-full h-full"
+          className="w-full h-full object-contain"
           draggable={false}
         />
         {wishes.map((wish, i) => (
