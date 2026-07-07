@@ -21,6 +21,12 @@ interface Spark {
   delay: number;
 }
 
+interface Cam {
+  tx: number;
+  ty: number;
+  zoom: number;
+}
+
 // 素材を同名で差し替えたらこの値を上げる(ブラウザキャッシュ無効化)
 const ASSET_VERSION = "2";
 
@@ -55,6 +61,9 @@ const SLOTS = [
 const MAX_WISHES = SLOTS.length;
 const STORAGE_KEY = "tanabata-wishes";
 
+// シーン(ステージ)はビューポートより横に広く、スワイプで左右にパンできる。
+const STAGE_VW = 150;
+
 const SEED_WISHES: Wish[] = [
   { id: 1, text: "みんなが健康でありますように", color: "red" },
   { id: 2, text: "織姫と彦星が会えますように", color: "blue" },
@@ -76,7 +85,7 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
 
   return (
     <div
-      className="absolute"
+      data-wid={wish.id}
       style={{
         position: "absolute",
         top: `${pos.top}%`,
@@ -97,12 +106,15 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
         <img
           src={asset(`tanzaku_${wish.color}.png`)}
           alt=""
-          className="w-full h-auto drop-shadow-[0_6px_10px_rgba(0,0,20,0.45)]"
-          style={{ display: "block", width: "100%", height: "auto" }}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "auto",
+            filter: "drop-shadow(0 6px 10px rgba(0,0,20,0.45))",
+          }}
           draggable={false}
         />
         <p
-          className="absolute flex items-center justify-center text-center"
           style={{
             position: "absolute",
             display: "flex",
@@ -113,6 +125,7 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
             bottom: "7%",
             left: "16%",
             right: "16%",
+            margin: 0,
             writingMode: "vertical-rl",
             color: INK[wish.color],
             fontSize: `${fontVmin}vmin`,
@@ -134,14 +147,51 @@ export default function TanabataDisplay() {
   const [input, setInput] = useState("");
   const [sparks, setSparks] = useState<Spark[]>([]);
   const [shooting, setShooting] = useState(false);
+  const [cam, setCam] = useState<Cam | null>(null);
+  const [smooth, setSmooth] = useState(false);
+
   const starVideoRef = useRef<HTMLVideoElement>(null);
   const bgVideoRef = useRef<HTMLVideoElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const camRef = useRef<Cam | null>(null);
+  const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, startTx: 0 });
+  const focusTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const nextId = useRef(100);
 
-  // 表示中ビューポートの高さ1%を --vh として供給(ブラウザのツールバーで
-  // 高さが変わる端末向けの補正)。JS が動かない古い WebView でも、CSS 側は
-  // var(--vh, 1vh) のフォールバックで通常の vh として機能するので問題ない。
+  // ---- カメラ(ステージのパン/ズーム)ヘルパ ----
+  const stageWpx = () => (window.innerWidth * STAGE_VW) / 100;
+  const defaultCam = useCallback((): Cam => {
+    return { tx: (window.innerWidth - stageWpx()) / 2, ty: 0, zoom: 1 };
+  }, []);
+  const clampTx = (tx: number, zoom: number) => {
+    const min = window.innerWidth - stageWpx() * zoom;
+    return Math.max(min, Math.min(0, tx));
+  };
+
+  // マウント時にカメラを中央にセット。camRef は state と同期。
+  useEffect(() => {
+    const c = defaultCam();
+    camRef.current = c;
+    setCam(c);
+    const onResize = () => {
+      const dc = defaultCam();
+      camRef.current = dc;
+      setCam(dc);
+      setSmooth(false);
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, [defaultCam]);
+  useEffect(() => {
+    camRef.current = cam;
+  }, [cam]);
+
+  // 表示中ビューポートの高さ1%を --vh として供給(ツールバーで高さが変わる端末補正)。
   useEffect(() => {
     const setVh = () => {
       const el = rootRef.current;
@@ -157,15 +207,13 @@ export default function TanabataDisplay() {
     };
   }, []);
 
-  // Android等で muted+autoPlay でも自動再生がブロックされることがあるため、
-  // マウント時とユーザー操作時に明示的に再生を試みる(失敗しても静止画にフォールバック)。
+  // Android等で muted+autoPlay でも自動再生がブロックされることがあるため明示再生。
   const playBg = useCallback(() => {
     const v = bgVideoRef.current;
     if (v && v.paused) {
       v.play().catch(() => {});
     }
   }, []);
-
   useEffect(() => {
     playBg();
   }, [playBg]);
@@ -194,6 +242,57 @@ export default function TanabataDisplay() {
     }
   }, [wishes, loaded]);
 
+  // ---- 視線誘導: 新しい短冊へカメラをズーム/パンして戻る ----
+  // タイマーは ref 管理(再レンダーで消えないように)。
+  const focusTanzaku = useCallback(
+    (id: number) => {
+      focusTimers.current.forEach(clearTimeout);
+      focusTimers.current = [];
+      // drop-in が落ち着いて DOM に出てから位置を測る
+      focusTimers.current.push(
+        setTimeout(() => {
+          const el = stageRef.current?.querySelector<HTMLElement>(
+            `[data-wid="${id}"]`
+          );
+          const c = camRef.current;
+          if (!el || !c) return;
+          const r = el.getBoundingClientRect();
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          // 画面座標 → ステージ座標(現在の transform を逆算)
+          const sx = (cx - c.tx) / c.zoom;
+          const sy = (cy - c.ty) / c.zoom;
+          const Z = 1.9;
+          const focus: Cam = {
+            tx: window.innerWidth / 2 - sx * Z,
+            ty: window.innerHeight / 2 - sy * Z,
+            zoom: Z,
+          };
+          setSmooth(true);
+          camRef.current = focus;
+          setCam(focus);
+          // 少し見せてから既定位置へ戻す
+          focusTimers.current.push(
+            setTimeout(() => {
+              const dc = defaultCam();
+              camRef.current = dc;
+              setCam(dc);
+              focusTimers.current.push(
+                setTimeout(() => setSmooth(false), 1000)
+              );
+            }, 2400)
+          );
+        }, 300)
+      );
+    },
+    [defaultCam]
+  );
+
+  useEffect(() => {
+    const timers = focusTimers.current;
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
   const addWish = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
@@ -205,6 +304,7 @@ export default function TanabataDisplay() {
     };
     setWishes((prev) => [...prev, wish].slice(-MAX_WISHES));
     setInput("");
+    focusTanzaku(wish.id); // 視線誘導のトリガ
 
     const video = starVideoRef.current;
     if (video) {
@@ -214,33 +314,76 @@ export default function TanabataDisplay() {
     }
   };
 
-  const burstSparks = useCallback((e: React.PointerEvent) => {
+  const burstSparks = useCallback(
+    (clientX: number, clientY: number) => {
+      const base = Date.now();
+      const burst: Spark[] = Array.from({ length: 8 }, (_, i) => ({
+        id: base + i,
+        x: clientX,
+        y: clientY,
+        dx: (Math.random() - 0.5) * 180,
+        dy: (Math.random() - 0.5) * 180,
+        rot: (Math.random() - 0.5) * 90,
+        size: 26 + Math.random() * 34,
+        delay: Math.random() * 0.12,
+      }));
+      setSparks((prev) => [...prev, ...burst]);
+      setTimeout(
+        () => setSparks((prev) => prev.filter((s) => !burst.includes(s))),
+        1200
+      );
+    },
+    []
+  );
+
+  // ---- スワイプ(左右パン) + タップ(星屑) ----
+  const onPointerDown = (e: React.PointerEvent) => {
     playBg();
-    if ((e.target as HTMLElement).closest("form")) return;
-    const base = Date.now();
-    const burst: Spark[] = Array.from({ length: 8 }, (_, i) => ({
-      id: base + i,
-      x: e.clientX,
-      y: e.clientY,
-      dx: (Math.random() - 0.5) * 180,
-      dy: (Math.random() - 0.5) * 180,
-      rot: (Math.random() - 0.5) * 90,
-      size: 26 + Math.random() * 34,
-      delay: Math.random() * 0.12,
-    }));
-    setSparks((prev) => [...prev, ...burst]);
-    setTimeout(
-      () => setSparks((prev) => prev.filter((s) => !burst.includes(s))),
-      1200
-    );
-  }, [playBg]);
+    if ((e.target as HTMLElement).closest("form")) return; // フォーム操作は無効
+    drag.current = {
+      active: true,
+      moved: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTx: camRef.current?.tx ?? 0,
+    };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d.active) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+      d.moved = true;
+      setSmooth(false);
+    }
+    if (d.moved) {
+      const c = camRef.current;
+      if (!c) return;
+      const nc: Cam = { ...c, tx: clampTx(d.startTx + dx, c.zoom) };
+      camRef.current = nc;
+      setCam(nc);
+    }
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d.active && !d.moved && !(e.target as HTMLElement).closest("form")) {
+      burstSparks(e.clientX, e.clientY);
+    }
+    d.active = false;
+  };
+
+  const stageTransform = cam
+    ? `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.zoom})`
+    : "translateX(-25vw)"; // JS 起動前の中央寄せフォールバック
 
   return (
     <div
       ref={rootRef}
       className="fixed inset-0 overflow-hidden select-none bg-black"
-      // 決定的なレイアウトは Tailwind クラスに頼らず inline で直接指定する
-      // (古い WebView が生成 CSS を解釈できない場合の保険)。
       style={{
         position: "fixed",
         top: 0,
@@ -249,164 +392,183 @@ export default function TanabataDisplay() {
         height: "calc(var(--vh, 1vh) * 100)",
         overflow: "hidden",
         background: "#000",
+        touchAction: "none",
       }}
-      onPointerDown={burstSparks}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
     >
-      {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示)。
-          画面の長辺に合わせて中央基準でトリミング(object-fit: cover)。
-          伸縮させないため cover を inline で確実に指定する。 */}
-      <video
-        ref={bgVideoRef}
-        className="absolute inset-0 w-full h-full object-cover"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: "center",
-        }}
-        src={asset("milkyway.mp4")}
-        poster={asset("sky.jpg")}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        onCanPlay={playBg}
-      />
-
-      {/* 願い事送信時の流れ星(黒背景動画をスクリーン合成)。
-          空の出来事なので竹や飾りの後ろに描画する */}
-      <video
-        ref={starVideoRef}
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover mix-blend-screen transition-opacity duration-500"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          mixBlendMode: "screen",
-          pointerEvents: "none",
-          opacity: shooting ? 1 : 0,
-          transition: "opacity 0.5s",
-        }}
-        src={asset("shooting_star.mp4")}
-        muted
-        playsInline
-        preload="auto"
-        onEnded={() => setShooting(false)}
-      />
-
-      {/* 吹き流し */}
-      <img
-        src={asset("fukinagashi.png")}
-        alt=""
-        className="absolute pointer-events-none"
-        style={{
-          position: "absolute",
-          pointerEvents: "none",
-          top: "calc(var(--vh, 1vh) * -2)",
-          left: "2vw",
-          height: "46vmin",
-          transformOrigin: "50% 0%",
-          animation: "swing 5.5s ease-in-out -1s infinite alternate",
-          ["--swing-from" as string]: "-2deg",
-          ["--swing-to" as string]: "2deg",
-        }}
-        draggable={false}
-      />
-
-      {/* 網飾り */}
-      <img
-        src={asset("amikazari.png")}
-        alt=""
-        className="absolute pointer-events-none opacity-90"
-        style={{
-          position: "absolute",
-          pointerEvents: "none",
-          opacity: 0.9,
-          top: "calc(var(--vh, 1vh) * -3)",
-          left: "19vw",
-          height: "38vmin",
-          transformOrigin: "50% 0%",
-          animation: "swing 7s ease-in-out -3s infinite alternate",
-          ["--swing-from" as string]: "-1.5deg",
-          ["--swing-to" as string]: "1.5deg",
-        }}
-        draggable={false}
-      />
-
-      {/* 折り鶴 */}
-      <img
-        src={asset("crane.png")}
-        alt=""
-        className="absolute pointer-events-none"
-        style={{
-          position: "absolute",
-          pointerEvents: "none",
-          top: "calc(var(--vh, 1vh) * 48)",
-          left: "7vw",
-          height: "13vmin",
-          animation: "floaty 6s ease-in-out infinite",
-        }}
-        draggable={false}
-      />
-
-      {/* 提灯 */}
-      <img
-        src={asset("lantern.png")}
-        alt=""
-        className="absolute pointer-events-none"
-        style={{
-          position: "absolute",
-          pointerEvents: "none",
-          bottom: "calc(var(--vh, 1vh) * 22)",
-          left: "3vw",
-          height: "17vmin",
-          transformOrigin: "50% 0%",
-          animation:
-            "swing 4.5s ease-in-out infinite alternate, lantern-glow 3s ease-in-out infinite",
-          ["--swing-from" as string]: "-2deg",
-          ["--swing-to" as string]: "2deg",
-        }}
-        draggable={false}
-      />
-
-      {/* 笹と短冊。サイズは .bamboo(CSS のみ・JS 非依存)で決める */}
+      {/* パン/ズームするシーン(ステージ)。背景・飾り・竹を載せる。 */}
       <div
-        className="bamboo absolute"
+        ref={stageRef}
         style={{
           position: "absolute",
-          right: "-6vmin",
-          bottom: "-3vh",
-          transformOrigin: "50% 100%",
-          animation: "bamboo-sway 6s ease-in-out infinite alternate",
+          top: 0,
+          left: 0,
+          width: `${STAGE_VW}vw`,
+          height: "100%",
+          transformOrigin: "0 0",
+          transform: stageTransform,
+          transition: smooth ? "transform 0.85s ease" : "none",
+          willChange: "transform",
         }}
       >
+        {/* 背景: 天の川の動画(読み込み中は poster の静止画)。ステージ全幅を覆う。 */}
+        <video
+          ref={bgVideoRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+          }}
+          src={asset("milkyway.mp4")}
+          poster={asset("sky.jpg")}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          onCanPlay={playBg}
+        />
+
+        {/* 願い事送信時の流れ星(黒背景動画をスクリーン合成) */}
+        <video
+          ref={starVideoRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            mixBlendMode: "screen",
+            pointerEvents: "none",
+            opacity: shooting ? 1 : 0,
+            transition: "opacity 0.5s",
+          }}
+          src={asset("shooting_star.mp4")}
+          muted
+          playsInline
+          preload="auto"
+          onEnded={() => setShooting(false)}
+        />
+
+        {/* 吹き流し */}
         <img
-          src={asset("bamboo.png")}
-          alt="笹"
-          className="w-full h-full object-contain"
-          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          src={asset("fukinagashi.png")}
+          alt=""
+          style={{
+            position: "absolute",
+            pointerEvents: "none",
+            top: "calc(var(--vh, 1vh) * -2)",
+            left: "28vw",
+            height: "46vmin",
+            transformOrigin: "50% 0%",
+            animation: "swing 5.5s ease-in-out -1s infinite alternate",
+            ["--swing-from" as string]: "-2deg",
+            ["--swing-to" as string]: "2deg",
+          }}
           draggable={false}
         />
-        {wishes.map((wish, i) => (
-          <Tanzaku key={wish.id} wish={wish} slot={i % SLOTS.length} />
-        ))}
+
+        {/* 網飾り */}
+        <img
+          src={asset("amikazari.png")}
+          alt=""
+          style={{
+            position: "absolute",
+            pointerEvents: "none",
+            opacity: 0.9,
+            top: "calc(var(--vh, 1vh) * -3)",
+            left: "44vw",
+            height: "38vmin",
+            transformOrigin: "50% 0%",
+            animation: "swing 7s ease-in-out -3s infinite alternate",
+            ["--swing-from" as string]: "-1.5deg",
+            ["--swing-to" as string]: "1.5deg",
+          }}
+          draggable={false}
+        />
+
+        {/* 折り鶴 */}
+        <img
+          src={asset("crane.png")}
+          alt=""
+          style={{
+            position: "absolute",
+            pointerEvents: "none",
+            top: "calc(var(--vh, 1vh) * 40)",
+            left: "34vw",
+            height: "13vmin",
+            animation: "floaty 6s ease-in-out infinite",
+          }}
+          draggable={false}
+        />
+
+        {/* 提灯 */}
+        <img
+          src={asset("lantern.png")}
+          alt=""
+          style={{
+            position: "absolute",
+            pointerEvents: "none",
+            bottom: "calc(var(--vh, 1vh) * 22)",
+            left: "30vw",
+            height: "17vmin",
+            transformOrigin: "50% 0%",
+            animation:
+              "swing 4.5s ease-in-out infinite alternate, lantern-glow 3s ease-in-out infinite",
+            ["--swing-from" as string]: "-2deg",
+            ["--swing-to" as string]: "2deg",
+          }}
+          draggable={false}
+        />
+
+        {/* 笹と短冊。ステージ中央に配置(サイズは .bamboo=CSS のみ)。 */}
+        <div
+          style={{
+            position: "absolute",
+            left: "75vw",
+            bottom: "-3vh",
+            transform: "translateX(-50%)",
+          }}
+        >
+          <div
+            className="bamboo"
+            style={{
+              position: "relative",
+              transformOrigin: "50% 100%",
+              animation: "bamboo-sway 6s ease-in-out infinite alternate",
+            }}
+          >
+            <img
+              src={asset("bamboo.png")}
+              alt="笹"
+              style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              draggable={false}
+            />
+            {wishes.map((wish, i) => (
+              <Tanzaku key={wish.id} wish={wish} slot={i % SLOTS.length} />
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* ===== 固定オーバーレイ(パンしない) ===== */}
 
       {/* タイトル */}
       <h1
-        className="absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
         style={{
           position: "absolute",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 10,
+          margin: 0,
           whiteSpace: "nowrap",
           textAlign: "center",
           top: "calc(var(--vh, 1vh) * 3)",
@@ -418,8 +580,13 @@ export default function TanabataDisplay() {
       >
         七夕かざり
         <span
-          className="block opacity-80"
-          style={{ display: "block", opacity: 0.8, fontSize: "0.42em", letterSpacing: "0.35em", marginTop: "0.4em" }}
+          style={{
+            display: "block",
+            opacity: 0.8,
+            fontSize: "0.42em",
+            letterSpacing: "0.35em",
+            marginTop: "0.4em",
+          }}
         >
           〜 星に願いを 〜
         </span>
@@ -428,7 +595,6 @@ export default function TanabataDisplay() {
       {/* 願い事フォーム */}
       <form
         onSubmit={addWish}
-        className="absolute left-[4vw] z-20 flex flex-col gap-2 rounded-2xl border border-white/25 bg-indigo-950/40 p-4 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,20,0.5)]"
         style={{
           position: "absolute",
           left: "4vw",
@@ -446,10 +612,10 @@ export default function TanabataDisplay() {
           bottom: "calc(var(--vh, 1vh) * 4)",
         }}
       >
-        <label htmlFor="wish" className="text-sm tracking-widest opacity-90" style={{ fontSize: "14px", opacity: 0.9 }}>
+        <label htmlFor="wish" style={{ fontSize: "14px", opacity: 0.9, letterSpacing: "0.1em" }}>
           願い事を短冊に
         </label>
-        <div className="flex gap-2" style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px" }}>
           <input
             id="wish"
             type="text"
@@ -457,7 +623,6 @@ export default function TanabataDisplay() {
             maxLength={20}
             onChange={(e) => setInput(e.target.value)}
             placeholder="例: 早起きできますように"
-            className="min-w-0 flex-1 rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-sm placeholder-white/40 outline-none focus:border-amber-200/70 focus:bg-white/15"
             style={{
               minWidth: 0,
               flex: "1 1 auto",
@@ -472,7 +637,6 @@ export default function TanabataDisplay() {
           />
           <button
             type="submit"
-            className="shrink-0 rounded-lg bg-amber-300/90 px-4 py-2 text-sm font-bold text-indigo-950 transition hover:bg-amber-200 active:scale-95"
             style={{
               flex: "0 0 auto",
               borderRadius: "8px",
@@ -482,6 +646,7 @@ export default function TanabataDisplay() {
               padding: "8px 16px",
               fontSize: "14px",
               fontWeight: 700,
+              cursor: "pointer",
             }}
           >
             飾る
@@ -489,13 +654,12 @@ export default function TanabataDisplay() {
         </div>
       </form>
 
-      {/* クリックで散る星屑(黒背景画像をスクリーン合成) */}
+      {/* クリック/タップで散る星屑(黒背景画像をスクリーン合成) */}
       {sparks.map((s) => (
         <img
           key={s.id}
           src={asset("sparkle.jpg")}
           alt=""
-          className="pointer-events-none absolute mix-blend-screen"
           style={{
             position: "absolute",
             pointerEvents: "none",
