@@ -125,7 +125,21 @@ export default function TanabataDisplay() {
   const [sparks, setSparks] = useState<Spark[]>([]);
   const [shooting, setShooting] = useState(false);
   const starVideoRef = useRef<HTMLVideoElement>(null);
+  const bgVideoRef = useRef<HTMLVideoElement>(null);
   const nextId = useRef(100);
+
+  // Android等で muted+autoPlay でも自動再生がブロックされることがあるため、
+  // マウント時とユーザー操作時に明示的に再生を試みる(失敗しても静止画にフォールバック)。
+  const playBg = useCallback(() => {
+    const v = bgVideoRef.current;
+    if (v && v.paused) {
+      v.play().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    playBg();
+  }, [playBg]);
 
   useEffect(() => {
     // /?reset で保存済みの短冊をクリアして初期状態に戻す
@@ -172,6 +186,7 @@ export default function TanabataDisplay() {
   };
 
   const burstSparks = useCallback((e: React.PointerEvent) => {
+    playBg();
     if ((e.target as HTMLElement).closest("form")) return;
     const base = Date.now();
     const burst: Spark[] = Array.from({ length: 8 }, (_, i) => ({
@@ -189,7 +204,7 @@ export default function TanabataDisplay() {
       () => setSparks((prev) => prev.filter((s) => !burst.includes(s))),
       1200
     );
-  }, []);
+  }, [playBg]);
 
   return (
     <div
@@ -203,6 +218,7 @@ export default function TanabataDisplay() {
         className="absolute inset-0 w-full h-full object-cover"
       />
       <video
+        ref={bgVideoRef}
         className="absolute inset-0 w-full h-full object-cover"
         src={asset("milkyway.mp4")}
         poster={asset("sky.jpg")}
@@ -210,6 +226,8 @@ export default function TanabataDisplay() {
         muted
         loop
         playsInline
+        preload="auto"
+        onCanPlay={playBg}
       />
 
       {/* 願い事送信時の流れ星(黒背景動画をスクリーン合成)。
