@@ -78,6 +78,7 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
     <div
       className="absolute"
       style={{
+        position: "absolute",
         top: `${pos.top}%`,
         left: `${pos.left + offsetX}%`,
         width: "9vmin",
@@ -88,6 +89,7 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
     >
       <div
         style={{
+          position: "relative",
           transformOrigin: "50% 0%",
           animation: `swing ${swingDur}s ease-in-out ${swingDelay}s infinite alternate`,
         }}
@@ -96,11 +98,17 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
           src={asset(`tanzaku_${wish.color}.png`)}
           alt=""
           className="w-full h-auto drop-shadow-[0_6px_10px_rgba(0,0,20,0.45)]"
+          style={{ display: "block", width: "100%", height: "auto" }}
           draggable={false}
         />
         <p
           className="absolute flex items-center justify-center text-center"
           style={{
+            position: "absolute",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
             top: "27%",
             bottom: "7%",
             left: "16%",
@@ -274,7 +282,18 @@ export default function TanabataDisplay() {
       <video
         ref={starVideoRef}
         className="pointer-events-none absolute inset-0 h-full w-full object-cover mix-blend-screen transition-opacity duration-500"
-        style={{ opacity: shooting ? 1 : 0 }}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          mixBlendMode: "screen",
+          pointerEvents: "none",
+          opacity: shooting ? 1 : 0,
+          transition: "opacity 0.5s",
+        }}
         src={asset("shooting_star.mp4")}
         muted
         playsInline
@@ -288,6 +307,8 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
+          position: "absolute",
+          pointerEvents: "none",
           top: "calc(var(--vh, 1vh) * -2)",
           left: "2vw",
           height: "46vmin",
@@ -305,6 +326,9 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none opacity-90"
         style={{
+          position: "absolute",
+          pointerEvents: "none",
+          opacity: 0.9,
           top: "calc(var(--vh, 1vh) * -3)",
           left: "19vw",
           height: "38vmin",
@@ -322,6 +346,8 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
+          position: "absolute",
+          pointerEvents: "none",
           top: "calc(var(--vh, 1vh) * 48)",
           left: "7vw",
           height: "13vmin",
@@ -336,6 +362,8 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
+          position: "absolute",
+          pointerEvents: "none",
           bottom: "calc(var(--vh, 1vh) * 22)",
           left: "3vw",
           height: "17vmin",
@@ -352,6 +380,7 @@ export default function TanabataDisplay() {
       <div
         className="bamboo absolute"
         style={{
+          position: "absolute",
           right: "-6vmin",
           bottom: "-3vh",
           transformOrigin: "50% 100%",
@@ -362,6 +391,7 @@ export default function TanabataDisplay() {
           src={asset("bamboo.png")}
           alt="笹"
           className="w-full h-full object-contain"
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
           draggable={false}
         />
         {wishes.map((wish, i) => (
@@ -373,6 +403,12 @@ export default function TanabataDisplay() {
       <h1
         className="absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
         style={{
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+          whiteSpace: "nowrap",
+          textAlign: "center",
           top: "calc(var(--vh, 1vh) * 3)",
           fontSize: "4.5vmin",
           textShadow:
@@ -383,7 +419,7 @@ export default function TanabataDisplay() {
         七夕かざり
         <span
           className="block opacity-80"
-          style={{ fontSize: "0.42em", letterSpacing: "0.35em", marginTop: "0.4em" }}
+          style={{ display: "block", opacity: 0.8, fontSize: "0.42em", letterSpacing: "0.35em", marginTop: "0.4em" }}
         >
           〜 星に願いを 〜
         </span>
@@ -394,15 +430,26 @@ export default function TanabataDisplay() {
         onSubmit={addWish}
         className="absolute left-[4vw] z-20 flex flex-col gap-2 rounded-2xl border border-white/25 bg-indigo-950/40 p-4 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,20,0.5)]"
         style={{
+          position: "absolute",
+          left: "4vw",
+          zIndex: 20,
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          padding: "16px",
+          borderRadius: "16px",
+          border: "1px solid rgba(255,255,255,0.25)",
+          background: "rgba(30,27,75,0.72)",
+          boxShadow: "0 8px 32px rgba(0,0,20,0.5)",
           width: "86vw",
           maxWidth: "330px",
           bottom: "calc(var(--vh, 1vh) * 4)",
         }}
       >
-        <label htmlFor="wish" className="text-sm tracking-widest opacity-90">
+        <label htmlFor="wish" className="text-sm tracking-widest opacity-90" style={{ fontSize: "14px", opacity: 0.9 }}>
           願い事を短冊に
         </label>
-        <div className="flex gap-2">
+        <div className="flex gap-2" style={{ display: "flex", gap: "8px" }}>
           <input
             id="wish"
             type="text"
@@ -411,10 +458,31 @@ export default function TanabataDisplay() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="例: 早起きできますように"
             className="min-w-0 flex-1 rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-sm placeholder-white/40 outline-none focus:border-amber-200/70 focus:bg-white/15"
+            style={{
+              minWidth: 0,
+              flex: "1 1 auto",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.3)",
+              background: "rgba(255,255,255,0.1)",
+              color: "#f2ecff",
+              padding: "8px 12px",
+              fontSize: "14px",
+              outline: "none",
+            }}
           />
           <button
             type="submit"
             className="shrink-0 rounded-lg bg-amber-300/90 px-4 py-2 text-sm font-bold text-indigo-950 transition hover:bg-amber-200 active:scale-95"
+            style={{
+              flex: "0 0 auto",
+              borderRadius: "8px",
+              border: "none",
+              background: "rgba(252,211,77,0.9)",
+              color: "#1e1b4b",
+              padding: "8px 16px",
+              fontSize: "14px",
+              fontWeight: 700,
+            }}
           >
             飾る
           </button>
@@ -429,6 +497,9 @@ export default function TanabataDisplay() {
           alt=""
           className="pointer-events-none absolute mix-blend-screen"
           style={{
+            position: "absolute",
+            pointerEvents: "none",
+            mixBlendMode: "screen",
             left: s.x,
             top: s.y,
             width: s.size,

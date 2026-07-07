@@ -31,6 +31,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
+      <head>
+        {/* React に依存せず(古い WebView でハイドレーションが失敗しても)
+            実表示領域の高さ1%を --vh に設定する。ES5 構文のみで記述。 */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){function s(){try{document.documentElement.style.setProperty('--vh',(window.innerHeight/100)+'px');}catch(e){}}s();window.addEventListener('resize',s);window.addEventListener('orientationchange',s);})();",
+          }}
+        />
+      </head>
       <body className={`${yujiSyuku.variable} antialiased`}>{children}</body>
     </html>
   );

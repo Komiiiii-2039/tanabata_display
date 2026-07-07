@@ -4,8 +4,16 @@
   --font-yuji: var(--font-yuji);
 }
 
+/* Tailwind の Preflight は @layer base に入るため、@layer 非対応の古い
+   WebView では効かない。最低限のリセットをトップレベルで補完する。 */
+* {
+  box-sizing: border-box;
+}
+
 html,
 body {
+  margin: 0;
+  padding: 0;
   height: 100%;
   overflow: hidden;
   background: #0d1035;
