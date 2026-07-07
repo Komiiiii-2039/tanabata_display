@@ -155,7 +155,18 @@ export default function TanabataDisplay() {
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const camRef = useRef<Cam | null>(null);
-  const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, startTx: 0 });
+  const gesture = useRef({
+    mode: "none" as "none" | "pan" | "pinch",
+    moved: false,
+    startX: 0,
+    startY: 0,
+    startTx: 0,
+    startTy: 0,
+    startZoom: 1,
+    startDist: 0,
+    focalSX: 0,
+    focalSY: 0,
+  });
   const lastTouch = useRef(0);
   const focusTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const nextId = useRef(100);
@@ -168,6 +179,11 @@ export default function TanabataDisplay() {
   const clampTx = (tx: number, zoom: number) => {
     const min = window.innerWidth - stageWpx() * zoom;
     return Math.max(min, Math.min(0, tx));
+  };
+  const clampTy = (ty: number, zoom: number) => {
+    // ステージ高さ = ビューポート高さ。ズーム時のみ上下に余白が生まれる。
+    const min = window.innerHeight * (1 - zoom);
+    return Math.max(min, Math.min(0, ty));
   };
 
   // マウント時にカメラを中央にセット。camRef は state と同期。
@@ -337,78 +353,142 @@ export default function TanabataDisplay() {
     []
   );
 
-  // ---- スワイプ(左右パン) + タップ(星屑) ----
+  // ---- スワイプ(パン) + ピンチ(ズーム) + タップ(星屑) ----
   // 古い WebView(Android 7.1)は Pointer Events 非対応のことがあるため、
-  // touch イベント(モバイル) と mouse イベント(PC) の両方で処理する。
-  const beginDrag = (x: number, y: number, target: EventTarget | null) => {
-    playBg();
-    if (target && (target as HTMLElement).closest?.("form")) {
-      drag.current.active = false;
-      return;
-    }
-    drag.current = {
-      active: true,
-      moved: false,
-      startX: x,
-      startY: y,
-      startTx: camRef.current?.tx ?? 0,
+  // touch イベント(モバイル) と mouse/wheel イベント(PC) で処理する。
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 3;
+
+  const applyCam = (tx: number, ty: number, zoom: number) => {
+    const nc: Cam = {
+      tx: clampTx(tx, zoom),
+      ty: clampTy(ty, zoom),
+      zoom,
     };
+    camRef.current = nc;
+    setCam(nc);
   };
-  const moveDrag = (x: number, y: number) => {
-    const d = drag.current;
-    if (!d.active) return;
-    const dx = x - d.startX;
-    const dy = y - d.startY;
-    if (!d.moved && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
-      d.moved = true;
+
+  const beginPan = (x: number, y: number) => {
+    const c = camRef.current;
+    const g = gesture.current;
+    g.mode = "pan";
+    g.moved = false;
+    g.startX = x;
+    g.startY = y;
+    g.startTx = c?.tx ?? 0;
+    g.startTy = c?.ty ?? 0;
+  };
+  const beginPinch = (t0: React.Touch, t1: React.Touch) => {
+    const c = camRef.current;
+    if (!c) return;
+    const g = gesture.current;
+    const mx = (t0.clientX + t1.clientX) / 2;
+    const my = (t0.clientY + t1.clientY) / 2;
+    g.mode = "pinch";
+    g.moved = true;
+    g.startZoom = c.zoom;
+    g.startDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY) || 1;
+    // 2本指の中点(ステージ座標)を固定して拡大する
+    g.focalSX = (mx - c.tx) / c.zoom;
+    g.focalSY = (my - c.ty) / c.zoom;
+  };
+  const doPan = (x: number, y: number) => {
+    const g = gesture.current;
+    if (g.mode !== "pan") return;
+    const dx = x - g.startX;
+    const dy = y - g.startY;
+    if (!g.moved && Math.hypot(dx, dy) > 8) {
+      g.moved = true;
       setSmooth(false);
     }
-    if (d.moved) {
+    if (g.moved) {
       const c = camRef.current;
       if (!c) return;
-      const nc: Cam = { ...c, tx: clampTx(d.startTx + dx, c.zoom) };
-      camRef.current = nc;
-      setCam(nc);
+      // ズーム中のみ上下方向もパンできる
+      const ty = c.zoom > 1 ? g.startTy + dy : c.ty;
+      applyCam(g.startTx + dx, ty, c.zoom);
     }
   };
-  const endDrag = (x: number, y: number, target: EventTarget | null) => {
-    const d = drag.current;
-    const tapped = d.active && !d.moved;
-    d.active = false;
-    if (tapped && !(target && (target as HTMLElement).closest?.("form"))) {
-      burstSparks(x, y);
-    }
+  const doPinch = (t0: React.Touch, t1: React.Touch) => {
+    const g = gesture.current;
+    const mx = (t0.clientX + t1.clientX) / 2;
+    const my = (t0.clientY + t1.clientY) / 2;
+    const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    let z = (g.startZoom * dist) / g.startDist;
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    setSmooth(false);
+    applyCam(mx - g.focalSX * z, my - g.focalSY * z, z);
   };
+
+  const inForm = (t: EventTarget | null) =>
+    !!(t && (t as HTMLElement).closest && (t as HTMLElement).closest("form"));
 
   const onTouchStart = (e: React.TouchEvent) => {
     lastTouch.current = Date.now();
-    const t = e.touches[0];
-    if (t) beginDrag(t.clientX, t.clientY, e.target);
+    playBg();
+    if (inForm(e.target)) {
+      gesture.current.mode = "none";
+      return;
+    }
+    if (e.touches.length >= 2) beginPinch(e.touches[0], e.touches[1]);
+    else beginPan(e.touches[0].clientX, e.touches[0].clientY);
   };
   const onTouchMove = (e: React.TouchEvent) => {
     lastTouch.current = Date.now();
-    const t = e.touches[0];
-    if (t) moveDrag(t.clientX, t.clientY);
+    const g = gesture.current;
+    if (e.touches.length >= 2) {
+      if (g.mode !== "pinch") beginPinch(e.touches[0], e.touches[1]);
+      else doPinch(e.touches[0], e.touches[1]);
+    } else if (g.mode === "pan") {
+      doPan(e.touches[0].clientX, e.touches[0].clientY);
+    }
   };
   const onTouchEnd = (e: React.TouchEvent) => {
     lastTouch.current = Date.now();
+    const g = gesture.current;
+    if (e.touches.length >= 1) {
+      // 指が1本残った(ピンチ→パン)。ジャンプ防止に残指でパンを開始し直す。
+      beginPan(e.touches[0].clientX, e.touches[0].clientY);
+      return;
+    }
+    const tapped = g.mode === "pan" && !g.moved;
+    g.mode = "none";
     const t = e.changedTouches[0];
-    endDrag(t ? t.clientX : 0, t ? t.clientY : 0, e.target);
+    if (tapped && t && !inForm(e.target)) burstSparks(t.clientX, t.clientY);
   };
 
   // PC 用。タッチ直後にエミュレートされる mouse は無視する。
   const isEmulatedMouse = () => Date.now() - lastTouch.current < 600;
   const onMouseDown = (e: React.MouseEvent) => {
     if (isEmulatedMouse()) return;
-    beginDrag(e.clientX, e.clientY, e.target);
+    playBg();
+    if (inForm(e.target)) {
+      gesture.current.mode = "none";
+      return;
+    }
+    beginPan(e.clientX, e.clientY);
   };
   const onMouseMove = (e: React.MouseEvent) => {
     if (isEmulatedMouse()) return;
-    moveDrag(e.clientX, e.clientY);
+    doPan(e.clientX, e.clientY);
   };
   const onMouseUp = (e: React.MouseEvent) => {
     if (isEmulatedMouse()) return;
-    endDrag(e.clientX, e.clientY, e.target);
+    const g = gesture.current;
+    const tapped = g.mode === "pan" && !g.moved;
+    g.mode = "none";
+    if (tapped && !inForm(e.target)) burstSparks(e.clientX, e.clientY);
+  };
+  const onWheel = (e: React.WheelEvent) => {
+    const c = camRef.current;
+    if (!c) return;
+    let z = c.zoom * (1 - e.deltaY * 0.0015);
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    const sx = (e.clientX - c.tx) / c.zoom;
+    const sy = (e.clientY - c.ty) / c.zoom;
+    setSmooth(false);
+    applyCam(e.clientX - sx * z, e.clientY - sy * z, z);
   };
 
   const stageTransform = cam
@@ -436,6 +516,7 @@ export default function TanabataDisplay() {
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
+      onWheel={onWheel}
     >
       {/* パン/ズームするシーン(ステージ)。背景・飾り・竹を載せる。 */}
       <div
@@ -496,16 +577,16 @@ export default function TanabataDisplay() {
           onEnded={() => setShooting(false)}
         />
 
-        {/* 吹き流し */}
+        {/* 吹き流し(左上から吊るす) */}
         <img
           src={asset("fukinagashi.png")}
           alt=""
           style={{
             position: "absolute",
             pointerEvents: "none",
-            top: "calc(var(--vh, 1vh) * -2)",
-            left: "28vw",
-            height: "46vmin",
+            top: "calc(var(--vh, 1vh) * -1)",
+            left: "33vw",
+            height: "40vmin",
             transformOrigin: "50% 0%",
             animation: "swing 5.5s ease-in-out -1s infinite alternate",
             ["--swing-from" as string]: "-2deg",
@@ -514,7 +595,7 @@ export default function TanabataDisplay() {
           draggable={false}
         />
 
-        {/* 網飾り */}
+        {/* 網飾り(右上から吊るす) */}
         <img
           src={asset("amikazari.png")}
           alt=""
@@ -522,9 +603,9 @@ export default function TanabataDisplay() {
             position: "absolute",
             pointerEvents: "none",
             opacity: 0.9,
-            top: "calc(var(--vh, 1vh) * -3)",
-            left: "44vw",
-            height: "38vmin",
+            top: "calc(var(--vh, 1vh) * -1)",
+            left: "63vw",
+            height: "32vmin",
             transformOrigin: "50% 0%",
             animation: "swing 7s ease-in-out -3s infinite alternate",
             ["--swing-from" as string]: "-1.5deg",
@@ -533,31 +614,31 @@ export default function TanabataDisplay() {
           draggable={false}
         />
 
-        {/* 折り鶴 */}
+        {/* 折り鶴(右手の空を舞う) */}
         <img
           src={asset("crane.png")}
           alt=""
           style={{
             position: "absolute",
             pointerEvents: "none",
-            top: "calc(var(--vh, 1vh) * 40)",
-            left: "34vw",
-            height: "13vmin",
+            top: "calc(var(--vh, 1vh) * 26)",
+            left: "96vw",
+            height: "12vmin",
             animation: "floaty 6s ease-in-out infinite",
           }}
           draggable={false}
         />
 
-        {/* 提灯 */}
+        {/* 提灯(左下に吊るす) */}
         <img
           src={asset("lantern.png")}
           alt=""
           style={{
             position: "absolute",
             pointerEvents: "none",
-            bottom: "calc(var(--vh, 1vh) * 22)",
-            left: "30vw",
-            height: "17vmin",
+            bottom: "calc(var(--vh, 1vh) * 20)",
+            left: "34vw",
+            height: "16vmin",
             transformOrigin: "50% 0%",
             animation:
               "swing 4.5s ease-in-out infinite alternate, lantern-glow 3s ease-in-out infinite",
