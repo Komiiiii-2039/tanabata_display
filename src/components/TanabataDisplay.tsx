@@ -80,7 +80,9 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
       style={{
         top: `${pos.top}%`,
         left: `${pos.left + offsetX}%`,
-        width: "clamp(54px, 9vmin, 96px)",
+        width: "9vmin",
+        minWidth: "54px",
+        maxWidth: "96px",
         animation: "drop-in 0.9s ease-out both",
       }}
     >
@@ -105,7 +107,7 @@ function Tanzaku({ wish, slot }: { wish: Wish; slot: number }) {
             right: "16%",
             writingMode: "vertical-rl",
             color: INK[wish.color],
-            fontSize: `clamp(10px, ${fontVmin}vmin, 21px)`,
+            fontSize: `${fontVmin}vmin`,
             lineHeight: 1.15,
             letterSpacing: "0.06em",
             textShadow: "0 0 3px rgba(0,0,0,0.12)",
@@ -126,7 +128,33 @@ export default function TanabataDisplay() {
   const [shooting, setShooting] = useState(false);
   const starVideoRef = useRef<HTMLVideoElement>(null);
   const bgVideoRef = useRef<HTMLVideoElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(100);
+
+  // 古い WebView(Android 7.1 / LG LD-290EJS 等)は dvh・min()・clamp()・env()
+  // 非対応のため、JS で実測した px を CSS 変数に流し込んで使う。
+  // --vh: 表示中ビューポートの高さ1%、--vmin: 短辺1%、
+  // --bamboo-w/h: 笹の実寸(縦横比を保ったまま画面に収まるサイズ)。
+  useEffect(() => {
+    const setVars = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      el.style.setProperty("--vh", `${h / 100}px`);
+      el.style.setProperty("--vmin", `${Math.min(w, h) / 100}px`);
+      const bambooW = Math.min(h * 0.51, w * 0.62);
+      el.style.setProperty("--bamboo-w", `${bambooW}px`);
+      el.style.setProperty("--bamboo-h", `${(bambooW * 1253) / 607}px`);
+    };
+    setVars();
+    window.addEventListener("resize", setVars);
+    window.addEventListener("orientationchange", setVars);
+    return () => {
+      window.removeEventListener("resize", setVars);
+      window.removeEventListener("orientationchange", setVars);
+    };
+  }, []);
 
   // Android等で muted+autoPlay でも自動再生がブロックされることがあるため、
   // マウント時とユーザー操作時に明示的に再生を試みる(失敗しても静止画にフォールバック)。
@@ -208,10 +236,11 @@ export default function TanabataDisplay() {
 
   return (
     <div
+      ref={rootRef}
       className="fixed inset-0 overflow-hidden select-none bg-black"
-      // 高さは表示中のビューポート(dvh)基準にする。inset-0 の bottom:0 は
-      // ツールバー/システムバーを含む大きい方の高さになり下端が隠れるため。
-      style={{ height: "100dvh" }}
+      // 高さは JS 実測(--vh)基準。inset-0 の bottom:0 はシステムバーを含む
+      // 大きい方の高さになり下端が隠れるため、実測した表示領域で上書きする。
+      style={{ height: "calc(var(--vh, 1vh) * 100)" }}
       onPointerDown={burstSparks}
     >
       {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示) */}
@@ -247,7 +276,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          top: "-2dvh",
+          top: "calc(var(--vh, 1vh) * -2)",
           left: "2vw",
           height: "46vmin",
           transformOrigin: "50% 0%",
@@ -264,7 +293,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none opacity-90"
         style={{
-          top: "-3dvh",
+          top: "calc(var(--vh, 1vh) * -3)",
           left: "19vw",
           height: "38vmin",
           transformOrigin: "50% 0%",
@@ -281,7 +310,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          top: "48dvh",
+          top: "calc(var(--vh, 1vh) * 48)",
           left: "7vw",
           height: "13vmin",
           animation: "floaty 6s ease-in-out infinite",
@@ -295,7 +324,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          bottom: "22dvh",
+          bottom: "calc(var(--vh, 1vh) * 22)",
           left: "3vw",
           height: "17vmin",
           transformOrigin: "50% 0%",
@@ -312,12 +341,11 @@ export default function TanabataDisplay() {
         className="absolute"
         style={{
           right: "-6vmin",
-          bottom: "-3dvh",
-          // 笹のサイズ。高さ(dvh)だけで決めると縦長画面では幅が画面の
-          // 大半を占めてしまうため、幅を dvh と vw の小さい方で制限する。
-          // 高さは笹画像の比率(607:1253)からその幅を基に算出。
-          width: "min(51dvh, 62vw)",
-          height: "calc(min(51dvh, 62vw) * 1253 / 607)",
+          bottom: "calc(var(--vh, 1vh) * -3)",
+          // 笹のサイズは JS 実測(--bamboo-w/h)。縦長画面で幅が画面の大半を
+          // 占めないよう、高さ51%と幅62%の小さい方を JS で算出している。
+          width: "var(--bamboo-w, 51vh)",
+          height: "var(--bamboo-h, calc(51vh * 1253 / 607))",
           transformOrigin: "50% 100%",
           animation: "bamboo-sway 6s ease-in-out infinite alternate",
         }}
@@ -335,9 +363,10 @@ export default function TanabataDisplay() {
 
       {/* タイトル */}
       <h1
-        className="absolute top-[3dvh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
+        className="absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
         style={{
-          fontSize: "clamp(20px, 4.5vmin, 44px)",
+          top: "calc(var(--vh, 1vh) * 3)",
+          fontSize: "4.5vmin",
           textShadow:
             "0 0 14px rgba(140,160,255,0.8), 0 2px 12px rgba(10,5,40,0.9)",
           letterSpacing: "0.25em",
@@ -357,9 +386,9 @@ export default function TanabataDisplay() {
         onSubmit={addWish}
         className="absolute left-[4vw] z-20 flex flex-col gap-2 rounded-2xl border border-white/25 bg-indigo-950/40 p-4 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,20,0.5)]"
         style={{
-          width: "min(86vw, 330px)",
-          // システムバー(safe-area)分だけ底上げして下端が隠れないようにする。
-          bottom: "calc(4dvh + env(safe-area-inset-bottom, 0px))",
+          width: "86vw",
+          maxWidth: "330px",
+          bottom: "calc(var(--vh, 1vh) * 4)",
         }}
       >
         <label htmlFor="wish" className="text-sm tracking-widest opacity-90">
