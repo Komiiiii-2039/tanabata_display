@@ -209,6 +209,9 @@ export default function TanabataDisplay() {
   return (
     <div
       className="fixed inset-0 overflow-hidden select-none bg-black"
+      // 高さは表示中のビューポート(dvh)基準にする。inset-0 の bottom:0 は
+      // ツールバー/システムバーを含む大きい方の高さになり下端が隠れるため。
+      style={{ height: "100dvh" }}
       onPointerDown={burstSparks}
     >
       {/* 背景: 天の川の動画のみ(読み込み中は poster の静止画を表示) */}
@@ -244,7 +247,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          top: "-2vh",
+          top: "-2dvh",
           left: "2vw",
           height: "46vmin",
           transformOrigin: "50% 0%",
@@ -261,7 +264,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none opacity-90"
         style={{
-          top: "-3vh",
+          top: "-3dvh",
           left: "19vw",
           height: "38vmin",
           transformOrigin: "50% 0%",
@@ -278,7 +281,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          top: "48vh",
+          top: "48dvh",
           left: "7vw",
           height: "13vmin",
           animation: "floaty 6s ease-in-out infinite",
@@ -292,7 +295,7 @@ export default function TanabataDisplay() {
         alt=""
         className="absolute pointer-events-none"
         style={{
-          bottom: "22vh",
+          bottom: "22dvh",
           left: "3vw",
           height: "17vmin",
           transformOrigin: "50% 0%",
@@ -309,12 +312,12 @@ export default function TanabataDisplay() {
         className="absolute"
         style={{
           right: "-6vmin",
-          bottom: "-3vh",
-          // 笹のサイズ。高さ(vh)だけで決めると縦長画面では幅が画面の
-          // 大半を占めてしまうため、幅を vh と vw の小さい方で制限する。
+          bottom: "-3dvh",
+          // 笹のサイズ。高さ(dvh)だけで決めると縦長画面では幅が画面の
+          // 大半を占めてしまうため、幅を dvh と vw の小さい方で制限する。
           // 高さは笹画像の比率(607:1253)からその幅を基に算出。
-          width: "min(51vh, 62vw)",
-          height: "calc(min(51vh, 62vw) * 1253 / 607)",
+          width: "min(51dvh, 62vw)",
+          height: "calc(min(51dvh, 62vw) * 1253 / 607)",
           transformOrigin: "50% 100%",
           animation: "bamboo-sway 6s ease-in-out infinite alternate",
         }}
@@ -332,7 +335,7 @@ export default function TanabataDisplay() {
 
       {/* タイトル */}
       <h1
-        className="absolute top-[3vh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
+        className="absolute top-[3dvh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap text-center"
         style={{
           fontSize: "clamp(20px, 4.5vmin, 44px)",
           textShadow:
@@ -352,8 +355,12 @@ export default function TanabataDisplay() {
       {/* 願い事フォーム */}
       <form
         onSubmit={addWish}
-        className="absolute bottom-[4vh] left-[4vw] z-20 flex flex-col gap-2 rounded-2xl border border-white/25 bg-indigo-950/40 p-4 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,20,0.5)]"
-        style={{ width: "min(86vw, 330px)" }}
+        className="absolute left-[4vw] z-20 flex flex-col gap-2 rounded-2xl border border-white/25 bg-indigo-950/40 p-4 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,20,0.5)]"
+        style={{
+          width: "min(86vw, 330px)",
+          // システムバー(safe-area)分だけ底上げして下端が隠れないようにする。
+          bottom: "calc(4dvh + env(safe-area-inset-bottom, 0px))",
+        }}
       >
         <label htmlFor="wish" className="text-sm tracking-widest opacity-90">
           願い事を短冊に
