@@ -156,6 +156,7 @@ export default function TanabataDisplay() {
   const stageRef = useRef<HTMLDivElement>(null);
   const camRef = useRef<Cam | null>(null);
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, startTx: 0 });
+  const lastTouch = useRef(0);
   const focusTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const nextId = useRef(100);
 
@@ -337,25 +338,27 @@ export default function TanabataDisplay() {
   );
 
   // ---- スワイプ(左右パン) + タップ(星屑) ----
-  const onPointerDown = (e: React.PointerEvent) => {
+  // 古い WebView(Android 7.1)は Pointer Events 非対応のことがあるため、
+  // touch イベント(モバイル) と mouse イベント(PC) の両方で処理する。
+  const beginDrag = (x: number, y: number, target: EventTarget | null) => {
     playBg();
-    if ((e.target as HTMLElement).closest("form")) return; // フォーム操作は無効
+    if (target && (target as HTMLElement).closest?.("form")) {
+      drag.current.active = false;
+      return;
+    }
     drag.current = {
       active: true,
       moved: false,
-      startX: e.clientX,
-      startY: e.clientY,
+      startX: x,
+      startY: y,
       startTx: camRef.current?.tx ?? 0,
     };
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {}
   };
-  const onPointerMove = (e: React.PointerEvent) => {
+  const moveDrag = (x: number, y: number) => {
     const d = drag.current;
     if (!d.active) return;
-    const dx = e.clientX - d.startX;
-    const dy = e.clientY - d.startY;
+    const dx = x - d.startX;
+    const dy = y - d.startY;
     if (!d.moved && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
       d.moved = true;
       setSmooth(false);
@@ -368,12 +371,44 @@ export default function TanabataDisplay() {
       setCam(nc);
     }
   };
-  const onPointerUp = (e: React.PointerEvent) => {
+  const endDrag = (x: number, y: number, target: EventTarget | null) => {
     const d = drag.current;
-    if (d.active && !d.moved && !(e.target as HTMLElement).closest("form")) {
-      burstSparks(e.clientX, e.clientY);
-    }
+    const tapped = d.active && !d.moved;
     d.active = false;
+    if (tapped && !(target && (target as HTMLElement).closest?.("form"))) {
+      burstSparks(x, y);
+    }
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    lastTouch.current = Date.now();
+    const t = e.touches[0];
+    if (t) beginDrag(t.clientX, t.clientY, e.target);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    lastTouch.current = Date.now();
+    const t = e.touches[0];
+    if (t) moveDrag(t.clientX, t.clientY);
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    lastTouch.current = Date.now();
+    const t = e.changedTouches[0];
+    endDrag(t ? t.clientX : 0, t ? t.clientY : 0, e.target);
+  };
+
+  // PC 用。タッチ直後にエミュレートされる mouse は無視する。
+  const isEmulatedMouse = () => Date.now() - lastTouch.current < 600;
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (isEmulatedMouse()) return;
+    beginDrag(e.clientX, e.clientY, e.target);
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (isEmulatedMouse()) return;
+    moveDrag(e.clientX, e.clientY);
+  };
+  const onMouseUp = (e: React.MouseEvent) => {
+    if (isEmulatedMouse()) return;
+    endDrag(e.clientX, e.clientY, e.target);
   };
 
   const stageTransform = cam
@@ -394,10 +429,13 @@ export default function TanabataDisplay() {
         background: "#000",
         touchAction: "none",
       }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
     >
       {/* パン/ズームするシーン(ステージ)。背景・飾り・竹を載せる。 */}
       <div
